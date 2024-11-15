@@ -1,5 +1,6 @@
 from itertools import chain, combinations
 from auxiliary_functions_index.min_cut_LP import min_cut_over_time
+import pandas as pd
 
 def all_valid_subsets(S_plus, S_minus):
     """
@@ -80,35 +81,8 @@ def aggregate_cut_time_points(sources, sinks, arcs, capacities, transit_times, t
 
     return time_points
 
-def create_A_inf(nodes, time_layer):
-    """
-    Creates the vertical arcs between consecutive time layers for each node and assigns capacities and transit times.
 
-    Parameters:
-    nodes (List[str]): List of nodes in the network.
-    time_layer (List[int]): List of time points.
-
-    Returns:
-    tuple: A tuple containing:
-        - A_inf (list): List of arc tuples representing edges between each node's consecutive time layers.
-        - capacities (dict): Dictionary with arc tuples as keys and default capacity values (10000) as values.
-        - lengths (dict): Dictionary with arc tuples as keys and calculated lengths (time difference between consecutive time layers) as values.
-    """
-
-    A_inf = []
-    capacities = {}
-    lengths = {}
-
-    for node in nodes:
-        for i in range(len(time_layer) - 1):
-            v = f'{node}^{time_layer[i]}'
-            w = f'{node}^{time_layer[i+1]}'
-            A_inf.append((v,w))
-            capacities[(v,w)] = 10000
-            lengths[(v,w)] = time_layer[i+1] - time_layer[i]
-    return A_inf, capacities, lengths
-
-def create_A_inf_old(nodes, time_points):
+def create_A_inf(nodes, time_points):
     """
     Creates a list of arcs between consecutive time points for each node and assigns capacities and transit times.
 
@@ -117,23 +91,103 @@ def create_A_inf_old(nodes, time_points):
     time_points (list): List of time points.
 
     Returns:
-    tuple: A tuple containing:
-        - A_inf (list): List of arc tuples representing edges between each node's consecutive time points.
-        - capacities (dict): Dictionary with arc tuples as keys and default capacity values (10000) as values.
-        - lengths (dict): Dictionary with arc tuples as keys and calculated lengths (difference between consecutive time layers) as values.
+    pd.DataFrame: df with columns:
+        - v^i
+        - w^j
+        - capacity	
+        - length	
+        - alpha_v	
+        - alpha_w	
     """
     
     A_inf = []
     capacities = {}
     lengths = {}
+    alpha_v = {}
+    alpha_w = {}
     for node in nodes:
-        for i in range(len(time_points) - 1):
-            v = f'{node}^{time_points[i]}'
-            w = f'{node}^{time_points[i+1]}'
-            A_inf.append((v,w))
-            capacities[(v,w)] = 10000
-            lengths[(v,w)] = time_points[i+1] - time_points[i]
-    return A_inf, capacities, lengths
+        for i, alpha_i in enumerate(time_points, start=1):
+            if i < max(time_points):
+                v = f'{node}^{i}'
+                w = f'{node}^{i+1}'
+                A_inf.append((v,w))
+                capacities[(v,w)] = 10000
+                lengths[(v,w)] = 1 # length of (vi,wj) is j - i; vertical arcs between consecutive layers  => length = 1
+                alpha_v[(v,w)] = time_points[i]
+                alpha_w[(v,w)] = time_points[i+1]
+
+    df_inf = pd.DataFrame({
+        'v^i': [arc[0] for arc in A_inf],
+        'w^j': [arc[1] for arc in A_inf],
+        'capacity': [capacities[arc] for arc in A_inf],
+        'length': [lengths[arc] for arc in A_inf],
+        'alpha_v':  [alpha_v[arc] for arc in A_inf],
+        'alpha_w':  [alpha_w[arc] for arc in A_inf],
+
+    })
+
+    return df_inf
+
+def initialize_A_fin(arcs, time_points, original_capacities, original_transit_times):
+    """
+    Creates the finite capacity arc set, computes the lengths of the arcs and sets the arc capacities to zero.
+
+    Parameters:
+    nodes (list): List of nodes in the network.
+    time_points (list): List of time points.
+
+    Returns:
+    pd.Dataframe: A df with columns:
+        - v^i
+        - w^j
+        - capacity (dict): Dictionary with arc tuples as keys and default capacity values (10000) as values.
+        - length (dict): Dictionary with arc tuples as keys and calculated lengths (difference between consecutive time layers) as values.
+        - alpha_v
+        - alpha_w
+        - original_capacity
+        - original_transit_time
+
+    """
+    # Initialize the finite capacity arcs with capacity and compute their length
+    A_fin = []
+    new_capacities = {}
+    original_capacities_dict = {}
+    original_transit_times_dict = {}
+    length = {}
+    alpha_v = {}
+    alpha_w = {}
+
+    # Loop over arcs and time points to compute the capacity and length for each inter-time-layer arc in the extened network
+    for arc in arcs:
+        v, w = arc
+        for i in range(len(time_points)):
+            # Initialize vi which is the i-th copy of the original node v
+            vi = f'{v}^{i + 1}'
+            for j in range(i,len(time_points)):
+                # Initialize wj which is the j-th copy of the original node w
+                wj = f'{w}^{j + 1}'
+                # add arc vi,wj, compute the length of the arc and initialize the new capacity with 0
+                A_fin.append((vi,wj))
+                new_capacities[(vi,wj)] = 0
+                length[(vi,wj)] = j - i
+                original_capacities_dict[(vi,wj)] = original_capacities[v,w]
+                original_transit_times_dict[(vi,wj)] = original_transit_times[v,w]
+                alpha_v[(vi,wj)] = time_points[i]
+                alpha_w[(vi,wj)] = time_points[j]
+
+    #A_fin, new_capacities, lengths_fin, original_capacities, original_transit_times = create_A_fin(arcs, time_points, capacities, transit_times)
+    df_fin = pd.DataFrame({
+        'v^i': [arc[0] for arc in A_fin],
+        'w^j': [arc[1] for arc in A_fin],
+        'capacity': [new_capacities[arc] for arc in A_fin],
+        'length': [length[arc] for arc in A_fin],
+        'alpha_v':  [alpha_v[arc] for arc in A_fin],
+        'alpha_w':  [alpha_w[arc] for arc in A_fin],        
+        'original_capacity': [original_capacities_dict[arc] for arc in A_fin],
+        'original_transit_time': [original_transit_times_dict[arc] for arc in A_fin]
+    })
+
+    return df_fin
 
 
 def get_time_level(strings):

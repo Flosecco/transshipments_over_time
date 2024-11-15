@@ -18,6 +18,18 @@ def create_graph(A, u, tau, alpha=None):
     
     return G
 
+def create_graph_from_df(df, tails, heads, capacities, transit_times, alpha=None):
+    # Create a directed graph
+    G = nx.DiGraph()
+    
+    # Add edges with transi_ttime and capacity attributes
+    for arc in range(len(df)):
+        G.add_edge(u_of_edge=df.at[arc, tails],
+                   v_of_edge=df.at[arc, heads], 
+                   capacity=df.at[arc, capacities], 
+                   transit_time=df.at[arc, transit_times])
+    
+    return G
 
 def visualize_graph(G, sources=[], sinks=[]):
     pos = nx.spring_layout(G)  # Position nodes using a spring layout for visualization
