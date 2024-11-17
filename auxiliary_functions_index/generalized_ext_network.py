@@ -129,6 +129,10 @@ def create_A_inf(nodes, time_points):
 
     })
 
+    # Compute time level nr (by splitting the node's name at '^' and taking the latter part)
+    df_inf['i'] = [int(s.split('^')[1]) for s in df_inf['v^i']] 
+    df_inf['j'] = [int(s.split('^')[1]) for s in df_inf['w^j']] 
+
     return df_inf
 
 def initialize_A_fin(arcs, time_points, original_capacities, original_transit_times):
