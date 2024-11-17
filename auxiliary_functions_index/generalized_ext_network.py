@@ -1,5 +1,8 @@
 from itertools import chain, combinations
 from auxiliary_functions_index.min_cut_LP import min_cut_over_time
+from auxiliary_functions_index.networkx_utilities import create_graph_from_df, cut_capacity
+import networkx as nx
+import matplotlib.pyplot as plt
 import pandas as pd
 
 def all_valid_subsets(S_plus, S_minus):
@@ -111,7 +114,7 @@ def create_A_inf(nodes, time_points):
                 v = f'{node}^{i}'
                 w = f'{node}^{i+1}'
                 A_inf.append((v,w))
-                capacities[(v,w)] = 10000
+                capacities[(v,w)] = float('inf')
                 lengths[(v,w)] = 1 # length of (vi,wj) is j - i; vertical arcs between consecutive layers  => length = 1
                 alpha_v[(v,w)] = time_points[i]
                 alpha_w[(v,w)] = time_points[i+1]
@@ -202,6 +205,110 @@ def get_time_level(strings):
     """
     time_levels = [int(s.split('^')[1]) for s in strings]
     return time_levels
+
+
+def create_A_fin(arcs, time_points, original_capacities, original_transit_times, index_to_alpha):
+
+    # initalize the finite-capacty arc set with capacity = 0
+    df_fin = initialize_A_fin(arcs, time_points, original_capacities, original_transit_times)
+
+    # Compute time level nr (by splitting the node's name at '^' and taking the latter part)
+    df_fin['i'] = [int(s.split('^')[1]) for s in df_fin['v^i']] 
+    df_fin['j'] = [int(s.split('^')[1]) for s in df_fin['w^j']] 
+    
+
+    # Helper function to calculate the capacity for arcs of length zero
+    def calculate_capacity_for_length_zero_arcs(row):
+        # Set capacities for arcs of length 0, which do not belong to the top layer
+        if (row['length'] == 0) and (row['alpha_v']  < max(time_points)):
+            # capacity(v^i,w^i) = original_capacity(v,w) * (alpha(i+1) - alpha(i) - transit_time(v,w))
+            return max(0, row['original_capacity'] * (index_to_alpha[row['i'] + 1] - row['alpha_v'] - row['original_transit_time']))
+        else:
+            return row['capacity']  # Or another default value if needed
+
+
+    # Apply the function row-wise and assign the result to a new column
+    df_fin['capacity'] = df_fin.apply(calculate_capacity_for_length_zero_arcs, axis=1) 
+
+
+    # Compute arc capacites for arc lengths of ell > 0
+    # Helper function
+    def max_term_for_arcs_of_lenth_at_least_1(row):
+        # Access the required alpha values
+        alpha_1 = row['alpha_v'] # alpha[i]
+        alpha_2 = index_to_alpha[row['i'] + ell + 1] # alpha[i + ell + 1]
+        
+        # Calculate the max term
+        max_term = max(0, row['original_capacity'] * (alpha_2 - alpha_1 - row['original_transit_time']))
+        
+        return max_term
+
+    #df_fin['window_cap'] = None
+    for ell in range(1, len(time_points)): # for ell in {1, 2, | T_tilde | - 1}
+        # Loop over the arcs of length ell
+        if ell == 2:
+            break
+        df = df_fin[df_fin['length'] == ell]
+        for index, row in df.iterrows():
+            # Create networkx graph with current capacities
+            graph = create_graph_from_df(df_fin, 'v^i', 'w^j', 'capacity', 'length')
+            # For arc (v^i, w^j) get the original node names v,w and the indices i,j
+            v, i = row['v^i'].split('^') 
+            w, j = row['w^j'].split('^') 
+            # leave the capacities for arcs inside and into the top layer unchanged
+            if (int(j) < len(time_points)) and (int(i) < len(time_points)):
+                print('index : ', index, f"\t arc : ({row['v^i']}, {row['w^j']})")
+                # Node sets {v^i, v^{i+1}, ..., v^j} and {w^i, w^{i+1}, ..., w^j}
+                V_i_to_j = [f'{v}^{k}' for k in range(int(i), int(j)+1)]
+                W_i_to_j = [f'{w}^{k}' for k in range(int(i), int(j)+1)]
+                # Compute the capacity of the cut separating V_i_to_j and W_i_to_j 
+                window_capacity = cut_capacity(graph, V_i_to_j, W_i_to_j)
+                # Compute capacity for current arc
+                cap = max_term_for_arcs_of_lenth_at_least_1(row) - window_capacity
+                df.at[index, 'capacity'] = cap
+                df_fin.at[index, 'capacity'] = cap
+                #df_fin.at[index, 'window_cap'] = window_capacity
+                print(f"new cap of ({row['v^i']}, {row['w^j']}) = ", cap)
+
+    return df_fin
+
+
+def plot_GTEN(df, v, w, capacity, length, alpha_v, alpha_w):
+    # Create a directed graph
+    G = nx.DiGraph()
+
+    # Add edges to the graph along with attributes
+    for _, row in df.iterrows():
+        G.add_edge(row[v], row[w], capacity=row[capacity], length=row[length])
+
+    # Set node positions based on layers alpha_v and alpha_w
+    pos = {}
+    layer_gap = 5
+    node_gap = 1
+
+    for _, row in df.iterrows():
+        x, y = row[v], row[w]  
+        pos[x] = (int(x.split('^')[0]) * node_gap, row[alpha_v] * layer_gap)
+        pos[y] = (int(y.split('^')[0]) * node_gap, row[alpha_w] * layer_gap)
+
+    # Draw the graph
+    plt.figure(figsize=(10, 6))
+    nx.draw(
+        G, pos,
+        with_labels=True,
+        node_color='skyblue',
+        node_size=1000,
+        edge_color='gray',
+        arrows=True,
+        font_size=10,
+    )
+
+    # Add edge labels (capacity or length)
+    edge_labels = {(row[v], row[w]): f"u={row[capacity]}\nℓ={row[length]}" for _, row in df.iterrows()}
+    nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels,label_pos=0.4, font_color='red', font_size=9)
+
+    plt.title("Generalized Time-Expanded Graph")
+    plt.show()
 
 # arcs = [(1, 2), (1, 3), (2, 4), (3, 4)]  # Arcs in the network
 # capacities = {(1, 2): 1, (1, 3): 2, (2, 4): 1, (3, 4): 1}  # Cost for each arc in the objective

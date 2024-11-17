@@ -86,6 +86,32 @@ def find_cut_edges(graph, set_from, set_to):
     return list(set(cut_edges))
 
 
+def cut_capacity(graph, set_from, set_to):
+    """
+    Computes the capacity of a cut in a directed graph.
+
+    Parameters:
+    graph (networkx.DiGraph): A directed graph where each edge has a 'capacity' attribute.
+    set_from (set): Set of nodes on one side of the cut.
+    set_to (set): Set of nodes on the other side of the cut.
+
+    Returns:
+    int or float: The total capacity of edges crossing from set_s to set_t.
+    """
+    # Make sure, each node is only contained once in the sets set_from and set_to
+    set_from = list(set(set_from))
+    set_to = list(set(set_to))
+    print('V_i_to_j = ', set_from)
+    print('W_i_to_j = ', set_to)
+    cut_capacity = 0
+    for u in set_from:
+        for v in graph.successors(u):
+            if v in set_to:
+                cut_capacity += graph[u][v].get('capacity', 0)
+    print('total cut capacity : ', cut_capacity)
+    return int(cut_capacity)
+
+
 # # Example usage of creating a graph:
 # A = [(1, 2), (1, 3), (2, 4), (3, 4)]  # Arcs in the network
 # u = {(1, 2): 1, (1, 3): 2, (2, 4): 1, (3, 4): 1}  # Cost for each arc in the objective
